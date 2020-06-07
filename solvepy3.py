@@ -16,7 +16,7 @@ class Solver:
         while self.have_unassigned():
             conf_clause = self.unit_propagate()
             if conf_clause is not None:
-                st, learned = self.conflict_analyze(conf_clause)
+                st, learned = self.conflict_analysis(conf_clause)
                 if st < 0:
                     return False
                 self.learned_clauses.add(learned)
@@ -227,17 +227,19 @@ class Solver:
             learned.add(var)
         return frozenset(learned)
 
-    def conflict_analyze(self, conflict_clause):
+    def conflict_analysis(self, conflict_clause):
         if self.step == 0:
             return -1, None
         assign = self.get_assign_history()
         learned, prev = self.learn_from_conflict(assign, conflict_clause)
 
         if len(prev) != 0:
-            step = max([self.nodes[abs(x)].step for x in prev])
+            steps = []
+            for var in prev:
+                steps.append(self.nodes[abs(var)].step)
+            return max(steps), learned
         else:
-            step = self.step - 1
-        return step, learned
+            return self.step - 1, learned
 
     def backtrack(self, to_step):
         self.remake_node(to_step)
