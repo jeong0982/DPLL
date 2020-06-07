@@ -183,7 +183,7 @@ class Solver:
                 if self.step in self.implication_var.keys():
                     self.implication_var[self.step].append(prop_literal)
     
-    def get_assign_history(self):
+    def get_assign_record(self):
         return [self.decision_var[self.step]] + self.implication_var[self.step]
 
     def learn_from_conflict(self, assign, conflict_clause):
@@ -230,7 +230,7 @@ class Solver:
     def conflict_analysis(self, conflict_clause):
         if self.step == 0:
             return -1, None
-        assign = self.get_assign_history()
+        assign = self.get_assign_record()
         learned, prev = self.learn_from_conflict(assign, conflict_clause)
 
         if len(prev) != 0:
