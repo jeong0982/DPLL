@@ -5,7 +5,7 @@ class Solver:
     def __init__(self, clauses, variables):
         self.clauses = clauses
         self.vars = variables
-        self.learnts = set()
+        self.learned_clauses = set()
         self.assigns = dict.fromkeys(list(self.vars), -1)
         self.step = 0
         self.nodes = self.set_initial_nodes()
@@ -14,12 +14,12 @@ class Solver:
 
     def solve(self):
         while self.have_unassigned():
-            conf_cls = self.unit_propagate()
-            if conf_cls is not None:
-                st, learnt = self.conflict_analyze(conf_cls)
+            conf_clause = self.unit_propagate()
+            if conf_clause is not None:
+                st, learned = self.conflict_analyze(conf_clause)
                 if st < 0:
                     return False
-                self.learnts.add(learnt)
+                self.learned_clauses.add(learned)
                 self.backtrack(st)
                 self.step = st
             elif not self.have_unassigned():
@@ -152,7 +152,7 @@ class Solver:
 
     def get_propagation_conflict(self):
         prop = []
-        all_clauses = list(self.clauses.union(self.learnts))
+        all_clauses = list(self.clauses.union(self.learned_clauses))
         for clause in all_clauses:
             val = self.compute_clause(clause)
             if val == 1:
@@ -188,55 +188,58 @@ class Solver:
     def get_assign_history(self):
         return [self.decision_var[self.step]] + self.implication_var[self.step]
 
-    def conflict_analyze(self, conf_cls):
+    def learn_from_conflict(self, assign, conflict_clause):
+        todo = conflict_clause
+        done = set()
+        curr = set()
+        prev = set()
+        while True:
+            for lit in todo:
+                if self.nodes[abs(lit)].step == self.step:
+                    curr.add(lit)
+                else:
+                    prev.add(lit)
 
-        def next_recent_assigned(clause):
-            for v in reversed(assign_history):
-                if v in clause or -v in clause:
-                    return v, [x for x in clause if abs(x) != abs(v)]
+            if len(curr) == 1:
+                break
+            
+            for v in reversed(assign):
+                if v in curr or -v in curr:
+                    last_assigned = v
+                    others = []
+                    for l in curr:
+                        if abs(l) != abs(v):
+                            others.append(l)
+                    break
 
+            done.add(abs(last_assigned))
+            curr = set(others)
+
+            todo_clause = self.nodes[abs(last_assigned)].clause
+            todo = []
+            if todo_clause != None:
+                for lit in todo_clause:
+                    if not abs(lit) in done:
+                        todo.append(lit)
+        return self.learned_clause(curr.union(prev)), prev
+    
+    def learned_clause(self, clause):
+        learned = set()
+        for var in clause:
+            learned.add(var)
+        return frozenset(learned)
+
+    def conflict_analyze(self, conflict_clause):
         if self.step == 0:
             return -1, None
+        assign = self.get_assign_history()
+        learned, prev = self.learn_from_conflict(assign, conflict_clause)
 
-        assign_history = self.get_assign_history()
-
-        pool_lits = conf_cls
-        done_lits = set()
-        curr_step_lits = set()
-        prev_step_lits = set()
-
-        while True:
-            for lit in pool_lits:
-                if self.nodes[abs(lit)].step == self.step:
-                    curr_step_lits.add(lit)
-                else:
-                    prev_step_lits.add(lit)
-
-            if len(curr_step_lits) == 1:
-                break
-
-            last_assigned, others = next_recent_assigned(curr_step_lits)
-
-            done_lits.add(abs(last_assigned))
-            curr_step_lits = set(others)
-
-            pool_clause = self.nodes[abs(last_assigned)].clause
-            pool_lits = []
-            if pool_clause != None:
-                for lit in pool_clause:
-                    if not abs(lit) in done_lits:
-                        pool_lits.append(lit)
-        
-        learnt = set()
-        for var in curr_step_lits.union(prev_step_lits):
-            learnt.add(var)
-        learnt = frozenset(learnt)
-
-        if prev_step_lits:
-            step = max([self.nodes[abs(x)].step for x in prev_step_lits])
+        if len(prev) != 0:
+            step = max([self.nodes[abs(x)].step for x in prev])
         else:
             step = self.step - 1
-        return step, learnt
+        return step, learned
 
     def backtrack(self, to_step):
         self.remake_node(to_step)
@@ -279,7 +282,9 @@ def make_result(filename):
         clause = frozenset(map(int, line[:-1]))
         variables.update(map(abs, clause))
         clauses.add(clause)
+
     s = Solver(clauses, variables)
+
     if s.solve():
         print("s SATISFIABLE")
         res = ""
