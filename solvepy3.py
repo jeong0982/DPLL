@@ -47,8 +47,6 @@ class Solver:
     def update_implication(self, var, clause):
         self.set_node(var)
         node = self.nodes[var]
-        for v in [abs(lit) for lit in clause if abs(lit) != var]:
-            self.nodes[v].children.append(node)
         node.clause = clause
 
     def all_unassigned_vars(self):
@@ -247,11 +245,8 @@ class Solver:
         
     def remake_node(self, to_step):    
         for var, node in self.nodes.items():
-            if node.step <= to_step:
-                node.children[:] = [child for child in node.children if child.step <= to_step]
-            else:
+            if not node.step <= to_step:
                 node.step = -1
-                node.children = []
                 node.clause = None
                 self.assigns[node.variable] = -1
 
@@ -267,7 +262,6 @@ class Node:
     def __init__(self, var):
         self.variable = var
         self.step = -1
-        self.children = []
         self.clause = None
 
 def make_result(filename):
