@@ -8,8 +8,8 @@ class Solver:
         self.assigns = dict.fromkeys(list(self.vars), -1)
         self.level = 0
         self.nodes = self.set_initial_nodes()
-        self.branching_history = {}  # level -> branched variable
-        self.propagate_history = {}  # level -> propagate variables list
+        self.branching_history = {}
+        self.propagate_history = {}
     
     def set_initial_nodes(self):
         nodes = {}
@@ -61,7 +61,6 @@ class Solver:
 
     def set_node(self, var):
         node = self.nodes[var]
-        node.value = self.assigns[var]
         node.level = self.level
 
     def update_implication(self, var, clause):
@@ -86,12 +85,12 @@ class Solver:
         negative = {x: 0 for x in self.vars if self.assigns[x] == -1}
         for clause in self.all_unresolved_clauses():
             for v in clause:
-                try:
+                if v in positive.keys():
                     if v > 0:
                         positive[v] += 1
                     else:
                         negative[abs(v)] += 1
-                except KeyError:
+                else:
                     pass
         pos_count = max(positive.items(), key = operator.itemgetter(1))
         neg_count = max(negative.items(), key = operator.itemgetter(1))
@@ -150,6 +149,7 @@ class Solver:
     def get_unit_literal(self, clause):
         unassigned = []
         if len(clause) == 1:
+            clause = list(clause)
             if self.compute_value(clause[0]) == -1:
                 return clause[0]
         for var in clause:
@@ -162,37 +162,40 @@ class Solver:
             return None
         return unassigned[0]
 
+    def get_propagation_conflict(self):
+        prop = []
+        all_clauses = list(self.clauses.union(self.learnts))
+        for clause in all_clauses:
+            val = self.compute_clause(clause)
+            if val == 1:
+                continue
+            if val == 0:
+                return prop, clause
+            else:
+                unit_literal = self.get_unit_literal(clause)
+                if unit_literal == None:
+                    continue
+                prop_pair = (unit_literal, clause)
+                if prop_pair not in prop:
+                    prop.append(prop_pair)
+        return prop, None
+
     def unit_propagate(self):
         while True:
-            propagate_queue = []
-            all_clauses = list(self.clauses.union(self.learnts))
-            for clause in all_clauses:
-                val = self.compute_clause(clause)
-                if val == 1:
-                    continue
-                if val == 0:
-                    return clause
-                else:
-                    unit_literal = self.get_unit_literal(clause)
-                    if unit_literal == None:
-                        continue
-                    prop_pair = (unit_literal, clause)
-                    if prop_pair not in propagate_queue:
-                        propagate_queue.append(prop_pair)
-            if propagate_queue == []:
+            prop, conflict = self.get_propagation_conflict()
+            if conflict != None:
+                return conflict
+            if prop == []:
                 return None
-
-            for prop_literal, clause in propagate_queue:
+            for prop_literal, clause in prop:
                 prop_var = abs(prop_literal)
                 if prop_literal > 0:
                     self.assigns[prop_var] = 1
                 else:
                     self.assigns[prop_var] = 0
                 self.update_implication(prop_var, clause)
-                try:
+                if self.level in self.propagate_history.keys():
                     self.propagate_history[self.level].append(prop_literal)
-                except KeyError:
-                    pass
     
     def get_assign_history(self):
         return [self.branching_history[self.level]] + self.propagate_history[self.level]
@@ -230,31 +233,41 @@ class Solver:
             curr_level_lits = set(others)
 
             pool_clause = self.nodes[abs(last_assigned)].clause
-            pool_lits = [
-                l for l in pool_clause if abs(l) not in done_lits
-            ] if pool_clause is not None else []
+            pool_lits = []
+            if pool_clause != None:
+                for lit in pool_clause:
+                    if not abs(lit) in done_lits:
+                        pool_lits.append(lit)
+        
+        learnt = set()
+        for var in curr_level_lits.union(prev_level_lits):
+            learnt.add(var)
+        learnt = frozenset(learnt)
 
-        learnt = frozenset([l for l in curr_level_lits.union(prev_level_lits)])
         if prev_level_lits:
             level = max([self.nodes[abs(x)].level for x in prev_level_lits])
         else:
             level = self.level - 1
         return level, learnt
 
-    def backtrack(self, level):
+    def backtrack(self, to_level):
+        self.remake_node(to_level)
+        self.remake_history(to_level)
+        
+    def remake_node(self, to_level):    
         for var, node in self.nodes.items():
-            if node.level <= level:
-                node.children[:] = [child for child in node.children if child.level <= level]
+            if node.level <= to_level:
+                node.children[:] = [child for child in node.children if child.level <= to_level]
             else:
-                node.value = -1
                 node.level = -1
                 node.children = []
                 node.clause = None
                 self.assigns[node.variable] = -1
 
+    def remake_history(self, to_level):
         levels = list(self.propagate_history.keys())
         for lvl in levels:
-            if lvl <= level:
+            if lvl <= to_level:
                 continue
             del self.branching_history[lvl]
             del self.propagate_history[lvl]
@@ -262,12 +275,11 @@ class Solver:
 class Node:
     def __init__(self, var):
         self.variable = var
-        self.value = -1
         self.level = -1
         self.children = []
         self.clause = None
 
-for i in range(5):
+for i in range(3):
     index = i + 1
     st = 'cnf/uf75-0%d.cnf' % index
     s = Solver(st)
