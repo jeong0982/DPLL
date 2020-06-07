@@ -1,16 +1,38 @@
 import operator
+import sys
 
 class Solver:
-
-    def __init__(self, filename):
-        self.clauses, self.vars = self.read_file(filename)
+    def __init__(self, clauses, variables):
+        self.clauses = clauses
+        self.vars = variables
         self.learnts = set()
         self.assigns = dict.fromkeys(list(self.vars), -1)
-        self.level = 0
+        self.step = 0
         self.nodes = self.set_initial_nodes()
-        self.branching_history = {}
-        self.propagate_history = {}
-    
+        self.decision_var = {}
+        self.implication_var = {}
+
+    def solve(self):
+        while self.have_unassigned():
+            conf_cls = self.unit_propagate()
+            if conf_cls is not None:
+                st, learnt = self.conflict_analyze(conf_cls)
+                if st < 0:
+                    return False
+                self.learnts.add(learnt)
+                self.backtrack(st)
+                self.step = st
+            elif not self.have_unassigned():
+                break
+            else:
+                self.step += 1
+                var, val = self.decide_variable()
+                self.assigns[var] = val
+                self.decision_var[self.step] = var
+                self.implication_var[self.step] = []
+                self.set_node(var)
+        return True
+
     def set_initial_nodes(self):
         nodes = {}
         for var in list(self.vars):
@@ -18,50 +40,9 @@ class Solver:
             nodes[var] = node
         return nodes
 
-    def read_file(self, filename):
-        with open(filename) as f:
-            lines = [
-                line.strip().split() for line in f.readlines()
-                if (not (line.startswith('c') or
-                         line.startswith('%') or
-                         line.startswith('0'))
-                    and line != '\n')
-            ]
-
-        literals = set()
-        clauses = set()
-
-        for line in lines[1:]:
-            clause = frozenset(map(int, line[:-1]))
-            literals.update(map(abs, clause))
-            clauses.add(clause)
-
-        return clauses, literals
-
-    def solve(self):
-        while self.have_unassigned():
-            conf_cls = self.unit_propagate()
-            if conf_cls is not None:
-                lvl, learnt = self.conflict_analyze(conf_cls)
-                if lvl < 0:
-                    return False
-                self.learnts.add(learnt)
-                self.backtrack(lvl)
-                self.level = lvl
-            elif not self.have_unassigned():
-                break
-            else:
-                self.level += 1
-                bt_var, bt_val = self.pick_branching_variable()
-                self.assigns[bt_var] = bt_val
-                self.branching_history[self.level] = bt_var
-                self.propagate_history[self.level] = []
-                self.set_node(bt_var)
-        return True
-
     def set_node(self, var):
         node = self.nodes[var]
-        node.level = self.level
+        node.step = self.step
 
     def update_implication(self, var, clause):
         self.set_node(var)
@@ -74,26 +55,33 @@ class Solver:
         res = set()
         for v in self.assigns.keys():
             if self.assigns[v] == -1:
-                res.update(v)
+                res.add(v)
         return list(res)
-
+    
     def all_unresolved_clauses(self):
-        return filter(lambda c: self.compute_clause(c) == -1, self.clauses)
+        res = []
+        for clause in self.clauses:
+            if self.compute_clause(clause) == -1:
+                res.append(clause)
+        return res
 
-    def pick_branching_variable(self):
-        positive = {x: 0 for x in self.vars if self.assigns[x] == -1}
-        negative = {x: 0 for x in self.vars if self.assigns[x] == -1}
+    def decide_variable(self):
+        def make_tuple(x):
+            return (x, 0)
+        unassigned = self.all_unassigned_vars()
+        pos = dict(list(map(make_tuple, unassigned)))
+        neg = dict(list(map(make_tuple, unassigned)))
         for clause in self.all_unresolved_clauses():
             for v in clause:
-                if v in positive.keys():
+                if v in pos.keys():
                     if v > 0:
-                        positive[v] += 1
+                        pos[v] += 1
                     else:
-                        negative[abs(v)] += 1
+                        neg[abs(v)] += 1
                 else:
                     pass
-        pos_count = max(positive.items(), key = operator.itemgetter(1))
-        neg_count = max(negative.items(), key = operator.itemgetter(1))
+        pos_count = max(pos.items(), key = operator.itemgetter(1))
+        neg_count = max(neg.items(), key = operator.itemgetter(1))
         if pos_count[1] > neg_count[1]:
             return pos_count[0], 1
         else:
@@ -194,11 +182,11 @@ class Solver:
                 else:
                     self.assigns[prop_var] = 0
                 self.update_implication(prop_var, clause)
-                if self.level in self.propagate_history.keys():
-                    self.propagate_history[self.level].append(prop_literal)
+                if self.step in self.implication_var.keys():
+                    self.implication_var[self.step].append(prop_literal)
     
     def get_assign_history(self):
-        return [self.branching_history[self.level]] + self.propagate_history[self.level]
+        return [self.decision_var[self.step]] + self.implication_var[self.step]
 
     def conflict_analyze(self, conf_cls):
 
@@ -207,30 +195,30 @@ class Solver:
                 if v in clause or -v in clause:
                     return v, [x for x in clause if abs(x) != abs(v)]
 
-        if self.level == 0:
+        if self.step == 0:
             return -1, None
 
         assign_history = self.get_assign_history()
 
         pool_lits = conf_cls
         done_lits = set()
-        curr_level_lits = set()
-        prev_level_lits = set()
+        curr_step_lits = set()
+        prev_step_lits = set()
 
         while True:
             for lit in pool_lits:
-                if self.nodes[abs(lit)].level == self.level:
-                    curr_level_lits.add(lit)
+                if self.nodes[abs(lit)].step == self.step:
+                    curr_step_lits.add(lit)
                 else:
-                    prev_level_lits.add(lit)
+                    prev_step_lits.add(lit)
 
-            if len(curr_level_lits) == 1:
+            if len(curr_step_lits) == 1:
                 break
 
-            last_assigned, others = next_recent_assigned(curr_level_lits)
+            last_assigned, others = next_recent_assigned(curr_step_lits)
 
             done_lits.add(abs(last_assigned))
-            curr_level_lits = set(others)
+            curr_step_lits = set(others)
 
             pool_clause = self.nodes[abs(last_assigned)].clause
             pool_lits = []
@@ -240,47 +228,84 @@ class Solver:
                         pool_lits.append(lit)
         
         learnt = set()
-        for var in curr_level_lits.union(prev_level_lits):
+        for var in curr_step_lits.union(prev_step_lits):
             learnt.add(var)
         learnt = frozenset(learnt)
 
-        if prev_level_lits:
-            level = max([self.nodes[abs(x)].level for x in prev_level_lits])
+        if prev_step_lits:
+            step = max([self.nodes[abs(x)].step for x in prev_step_lits])
         else:
-            level = self.level - 1
-        return level, learnt
+            step = self.step - 1
+        return step, learnt
 
-    def backtrack(self, to_level):
-        self.remake_node(to_level)
-        self.remake_history(to_level)
+    def backtrack(self, to_step):
+        self.remake_node(to_step)
+        self.remake_record(to_step)
         
-    def remake_node(self, to_level):    
+    def remake_node(self, to_step):    
         for var, node in self.nodes.items():
-            if node.level <= to_level:
-                node.children[:] = [child for child in node.children if child.level <= to_level]
+            if node.step <= to_step:
+                node.children[:] = [child for child in node.children if child.step <= to_step]
             else:
-                node.level = -1
+                node.step = -1
                 node.children = []
                 node.clause = None
                 self.assigns[node.variable] = -1
 
-    def remake_history(self, to_level):
-        levels = list(self.propagate_history.keys())
-        for lvl in levels:
-            if lvl <= to_level:
+    def remake_record(self, to_step):
+        steps = list(self.implication_var.keys())
+        for st in steps:
+            if st <= to_step:
                 continue
-            del self.branching_history[lvl]
-            del self.propagate_history[lvl]
+            del self.decision_var[st]
+            del self.implication_var[st]
 
 class Node:
     def __init__(self, var):
         self.variable = var
-        self.level = -1
+        self.step = -1
         self.children = []
         self.clause = None
 
-for i in range(3):
-    index = i + 1
-    st = 'cnf/uf75-0%d.cnf' % index
-    s = Solver(st)
-    print(s.solve())
+def make_result(filename):
+    f = open(filename)
+    info = []
+    for line in f.readlines():
+        if (not (line.startswith('c') or line.startswith('%') or line.startswith('0'))) and line != '\n':
+            info.append(line.strip().split())
+    variables = set()
+    clauses = set()
+    for line in info[1:]:
+        clause = frozenset(map(int, line[:-1]))
+        variables.update(map(abs, clause))
+        clauses.add(clause)
+    s = Solver(clauses, variables)
+    if s.solve():
+        print("s SATISFIABLE")
+        res = ""
+        prefix = "v"
+        st = ""
+        count = 0
+        value = s.assigns.items()
+        for var, val in value:
+            if count == 0:
+                st = st + prefix
+            if val == 0:
+                v = -var
+                st = st + " " + str(v)
+            else:
+                st = st + " " + str(var)
+            count += 1
+            if count == 5:
+                res = res + st + " 0\n"
+                st = ""
+                count = 0
+        if st != "":
+            res = res + st + " 0"
+        print(res)
+    else:
+        print("s UNSATISFIABLE")
+
+if __name__ == "__main__":
+    filename = sys.argv[1]
+    make_result(filename)
