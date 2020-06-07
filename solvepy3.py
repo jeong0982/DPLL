@@ -61,7 +61,7 @@ class Solver:
     def all_unresolved_clauses(self):
         res = []
         for clause in self.clauses:
-            if self.compute_clause(clause) == -1:
+            if self.get_value_from_clause(clause) == -1:
                 res.append(clause)
         return res
 
@@ -96,7 +96,7 @@ class Solver:
                 return True
         return False
 
-    def compute_clause(self, clause):
+    def get_value_from_clause(self, clause):
         values = []
         for var in clause:
             value = self.assigns[abs(var)]
@@ -118,7 +118,7 @@ class Solver:
         else:
             return max(values)
 
-    def compute_value(self, var):
+    def get_value_from_var(self, var):
         value = self.assigns[abs(var)]
         if value == -1:
             return -1
@@ -138,10 +138,10 @@ class Solver:
         unassigned = []
         if len(clause) == 1:
             clause = list(clause)
-            if self.compute_value(clause[0]) == -1:
+            if self.get_value_from_var(clause[0]) == -1:
                 return clause[0]
         for var in clause:
-            value = self.compute_value(var)
+            value = self.get_value_from_var(var)
             if value == 1:
                 return None
             if value == -1:
@@ -154,7 +154,7 @@ class Solver:
         prop = []
         all_clauses = list(self.clauses.union(self.learned_clauses))
         for clause in all_clauses:
-            val = self.compute_clause(clause)
+            val = self.get_value_from_clause(clause)
             if val == 1:
                 continue
             if val == 0:
