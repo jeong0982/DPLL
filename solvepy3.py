@@ -187,7 +187,7 @@ class SatSolver:
         return [self.decision_var[self.step]] + self.implication_var[self.step]
 
     def resolve(self, assign, curr):
-        for v in curr or -v in curr:
+        for v in assign:
             if v in curr or -v in curr:
                 assigned = v
                 clause = []
