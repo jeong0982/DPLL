@@ -1,7 +1,7 @@
 import operator
 import sys
 
-class Solver:
+class SatSolver:
     def __init__(self, clauses, variables):
         self.clauses = clauses
         self.vars = variables
@@ -132,7 +132,7 @@ class Solver:
                 else:
                     return 0
 
-    def get_unit_literal(self, clause):
+    def get_unit_var(self, clause):
         unassigned = []
         if len(clause) == 1:
             clause = list(clause)
@@ -158,10 +158,10 @@ class Solver:
             if val == 0:
                 return prop, clause
             else:
-                unit_literal = self.get_unit_literal(clause)
-                if unit_literal == None:
+                unit_var = self.get_unit_var(clause)
+                if unit_var == None:
                     continue
-                prop_pair = (unit_literal, clause)
+                prop_pair = (unit_var, clause)
                 if prop_pair not in prop:
                     prop.append(prop_pair)
         return prop, None
@@ -173,24 +173,36 @@ class Solver:
                 return conflict
             if prop == []:
                 return None
-            for prop_literal, clause in prop:
-                prop_var = abs(prop_literal)
-                if prop_literal > 0:
+            for prop_v, clause in prop:
+                prop_var = abs(prop_v)
+                if prop_v > 0:
                     self.assigns[prop_var] = 1
                 else:
                     self.assigns[prop_var] = 0
                 self.update_implication(prop_var, clause)
                 if self.step in self.implication_var.keys():
-                    self.implication_var[self.step].append(prop_literal)
+                    self.implication_var[self.step].append(prop_v)
     
     def get_assign_record(self):
         return [self.decision_var[self.step]] + self.implication_var[self.step]
+
+    def resolve(self, assign, curr):
+        for v in curr or -v in curr:
+            if v in curr or -v in curr:
+                assigned = v
+                clause = []
+                for var in curr:
+                    if abs(var) != abs(v):
+                        clause.append(var)
+                break
+        return assigned, clause
 
     def learn_from_conflict(self, assign, conflict_clause):
         todo = conflict_clause
         done = set()
         curr = set()
         prev = set()
+        assign_reversed = reversed(assign)
         while True:
             for lit in todo:
                 if self.nodes[abs(lit)].step == self.step:
@@ -201,19 +213,12 @@ class Solver:
             if len(curr) == 1:
                 break
             
-            for v in reversed(assign):
-                if v in curr or -v in curr:
-                    last_assigned = v
-                    others = []
-                    for l in curr:
-                        if abs(l) != abs(v):
-                            others.append(l)
-                    break
+            assigned_var, clause = self.resolve(assign_reversed, curr)
 
-            done.add(abs(last_assigned))
-            curr = set(others)
+            done.add(abs(assigned_var))
+            curr = set(clause)
 
-            todo_clause = self.nodes[abs(last_assigned)].clause
+            todo_clause = self.nodes[abs(assigned_var)].clause
             todo = []
             if todo_clause != None:
                 for lit in todo_clause:
@@ -279,7 +284,7 @@ def make_result(filename):
         variables.update(map(abs, clause))
         clauses.add(clause)
 
-    s = Solver(clauses, variables)
+    s = SatSolver(clauses, variables)
 
     if s.solve():
         print("s SATISFIABLE")
